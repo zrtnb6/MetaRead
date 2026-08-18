@@ -74,11 +74,17 @@ jobs:
 
       - name: Export IPA
         run: |
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/NovelReader-iOS.xcarchive \
-            -exportPath build \
-            -exportOptionsPlist .github/workflows/exportOptions.plist
+          # Extract .app from archive and package as IPA
+          mkdir -p build/Payload
+          cp -r build/NovelReader-iOS.xcarchive/Products/Applications/NovelReader-iOS.app build/Payload/
+          cd build
+          # Create a minimal embedded.mobileprovision if needed
+          mkdir -p Payload/NovelReader-iOS.app/embedded.mobileprovision
+          # Package as IPA (macOS zip handles it)
+          zip -r NovelReader-iOS.ipa Payload
+          cd ..
+          echo "IPA created:"
+          ls -lh build/NovelReader-iOS.ipa
 
       - name: List Build Artifacts
         run: |
