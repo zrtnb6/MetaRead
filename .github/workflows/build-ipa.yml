@@ -1,0 +1,100 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      code_signing:
+        description: 'Code Signing Mode'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - adhoc
+
+env:
+  DEV_TEAM_ID: ${{ secrets.DEV_TEAM_ID }}
+  CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
+
+jobs:
+  build-ipa:
+    name: Build NovelReader-iOS
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify XcodeGen
+        run: |
+          if ! command -v xcodegen &>/dev/null; then
+            echo "Installing XcodeGen..."
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode Project
+        run: |
+          xcodegen generate
+          ls -la *.xcodeproj
+
+      - name: Resolve Dependencies (SPM)
+        run: xcodebuild -project NovelReader.xcodeproj -scheme NovelReader-iOS -configuration Debug -destination 'generic/platform=iOS' -resolvePackageDependencies 2>&1 | tail -5
+
+      - name: Build iOS
+        run: |
+          if [ "${{ inputs.code_signing }}" = "development" ] && [ -n "${{ env.DEV_TEAM_ID }}" ]; then
+            echo "=== Building with DEVELOPMENT signing (DEV_TEAM_ID=${{ env.DEV_TEAM_ID }}) ==="
+            xcodebuild \
+              -project NovelReader.xcodeproj \
+              -scheme NovelReader-iOS \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath build/NovelReader-iOS \
+              CODE_SIGN_STYLE=Automatic \
+              CODE_SIGN_IDENTITY="${{ env.CODE_SIGN_IDENTITY }}" \
+              DEVELOPMENT_TEAM="${{ env.DEV_TEAM_ID }}" \
+              PRODUCT_BUNDLE_IDENTIFIER=com.cyberzen.reader \
+              archive
+          else
+            echo "=== Building with AD-HOC signing (no DEV_TEAM_ID or mode=adhoc) ==="
+            xcodebuild \
+              -project NovelReader.xcodeproj \
+              -scheme NovelReader-iOS \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath build/NovelReader-iOS \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              PRODUCT_BUNDLE_IDENTIFIER=com.cyberzen.reader \
+              archive
+          fi
+
+      - name: Export IPA
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/NovelReader-iOS.xcarchive \
+            -exportPath build \
+            -exportOptionsPlist .github/workflows/exportOptions.plist
+
+      - name: List Build Artifacts
+        run: |
+          echo "=== Build Artifacts ==="
+          find build -name "*.ipa" -o -name "*.app" | head -20
+          ls -lh build/*.ipa 2>/dev/null || echo "No .ipa found"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MetaRead-iOS-IPA
+          path: build/NovelReader-iOS.ipa
+          retention-days: 7
+
+      - name: Download Link
+        if: github.event.inputs.auto_download == 'true'
+        run: |
+          echo "✅ Build complete! Download the IPA from the Artifacts section above."
+          echo "Filename: NovelReader-iOS.ipa"
